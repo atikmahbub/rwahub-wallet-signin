@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { useMockDataStore } from '@/store/mockDataStore';
 import { formatCurrency } from '@/utils/format';
 import { useAuthStore } from '@/store/authStore';
-import { isOnChainConfigured } from '@/utils/onchain';
+import { WalletStatusCard } from '@/components/WalletStatusCard';
 import { dashboardApi, DashboardStats } from '@/api/dashboard';
 
 function statusLabel(status?: string) {
@@ -49,15 +49,6 @@ export default function DashboardPage() {
       .catch(() => setDashboardStats(null));
   }, [searchQuery, filterType]);
   const user = useAuthStore((state) => state.user);
-  const switchToPharos = useAuthStore((state) => state.switchToPharos);
-  const wallet = user?.wallet;
-  const onPharos = wallet?.chainId === 50002;
-  const onHardhat = wallet?.chainId === 31337;
-  const chainReady = onPharos || onHardhat;
-  const onChainLive = isOnChainConfigured();
-  const walletLabel = wallet?.address
-    ? `${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`
-    : 'Not connected';
 
   const filteredAssets = useMemo(() => {
     try {
@@ -133,25 +124,7 @@ export default function DashboardPage() {
             Welcome back{displayName ? `, ${displayName}` : ''}! Here's an overview of your assets
           </p>
         </div>
-        <div className="text-right">
-          <p className="text-sm text-gray-500">Wallet</p>
-          <p className="font-medium text-gray-900">{walletLabel}</p>
-          <p className={`text-xs mt-1 ${chainReady ? 'text-green-600' : 'text-amber-600'}`}>
-            {onHardhat ? 'Hardhat Local' : onPharos ? 'Pharos Devnet' : wallet?.chainId ? `Chain ${wallet.chainId}` : 'Network unknown'}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            {onChainLive ? 'On-chain contracts configured' : 'Local demo only'}
-          </p>
-          {!chainReady && wallet?.isConnected ? (
-            <Button
-              variant="outline"
-              className="mt-2"
-              onClick={() => switchToPharos()}
-            >
-              Switch network
-            </Button>
-          ) : null}
-        </div>
+        <WalletStatusCard />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

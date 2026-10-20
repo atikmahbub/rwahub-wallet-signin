@@ -22,7 +22,7 @@ const HARDHAT_NETWORK_CONFIG = {
   nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
 };
 
-const getTargetNetwork = () => {
+export const getTargetNetwork = () => {
   if (deployed.marketplace && Number(deployed.chainId) === HARDHAT_CHAIN_ID) {
     return {
       chainId: HARDHAT_CHAIN_ID,
