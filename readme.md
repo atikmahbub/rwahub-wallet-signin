@@ -34,6 +34,50 @@ By leveraging blockchain technology and smart contracts, RWAHub ensures secure, 
    - Frontend: http://localhost:5173
    - Backend API: http://localhost:3001
 
+## Wallet Sign In changes
+
+Sign In was MetaMask + local state, and a few cases were easy to get wrong: on the wrong
+network you were sent to the dashboard before you could see the warning, a rejected popup
+showed a generic error, the address was never in the Header, and Disconnect did a full page
+reload. This branch fixes those without touching the server or contracts.
+
+**What changed**
+
+- The store now has one `walletStatus`: `no-wallet`, `disconnected`, `connecting`,
+  `connected`, `wrong-network`, `rejected`, `error`. The UI renders from that instead of
+  guessing from `loading` / `error` / `isAuthenticated`.
+- MetaMask errors are mapped by code (4001 rejected, -32002 request already pending) to
+  short messages, in `src/lib/wallet/errors.ts`.
+- The Sign In modal shows a screen per status. On the wrong network it stays open with a
+  "Switch network" button instead of redirecting.
+- Header shows the connected address with a green / amber network dot. The dashboard has a
+  small wallet card (copy address, network, switch, disconnect).
+- Disconnect resets state and navigates to `/`, no reload. It also tries
+  `wallet_revokePermissions` so the next Sign In asks MetaMask again.
+- On page load the app checks `eth_accounts` / `eth_chainId` (no popup) and re-attaches the
+  account/network listeners, so a locked wallet or switched account is picked up after a refresh.
+
+**Files**
+
+- `src/store/authStore.ts` - status, connect / switch / disconnect / sync
+- `src/lib/wallet/errors.ts` - status type and error mapping
+- `src/components/AuthModal.tsx` - Sign In states
+- `src/components/layout/Header.tsx` - address chip and Disconnect
+- `src/components/WalletStatusCard.tsx` - dashboard wallet card
+- `src/App.tsx` - wallet sync on load, redirect only when on the right network
+
+**Testing it by hand**
+
+1. Disable MetaMask and open Sign In: you get the install link.
+2. Connect and reject the popup: "You cancelled the request" + Try again.
+3. Put the site on another chain, e.g. in the console:
+   `ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xaa36a7' }] })`,
+   then sign in and reject the switch: the modal shows the wrong network screen.
+4. Connect on the right network: address in the Header and on the dashboard.
+5. Switch account or network in MetaMask: Header and card update without a refresh.
+6. Disconnect: back to `/` with the Sign In button.
+
+
 
 ### 1. Asset Tokenization
 **Purpose**: Converts physical assets into digital tokens on the blockchain.
