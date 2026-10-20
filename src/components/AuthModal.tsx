@@ -1,8 +1,8 @@
 import React, { useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Wallet } from 'lucide-react';
+import { X, Wallet, Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { Button } from './ui/Button';
-import { useAuthStore } from '@/store/authStore';
+import { getTargetNetwork, useAuthStore } from '@/store/authStore';
 import { AnimatedLogo } from './AnimatedLogo';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,7 +12,18 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { connectWallet, loading, error, clearError, isAuthenticated } = useAuthStore();
+  const {
+    connectWallet,
+    switchToPharos,
+    disconnectWallet,
+    error,
+    clearError,
+    walletStatus,
+    user,
+  } = useAuthStore();
+  const hasWallet = typeof window !== 'undefined' && Boolean((window as any).ethereum);
+  const status = !hasWallet && walletStatus === 'disconnected' ? 'no-wallet' : walletStatus;
+  const address = user?.wallet?.address;
   const navigate = useNavigate();
 
   const goToDashboard = useCallback(() => {
@@ -22,10 +33,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   }, [navigate, onClose]);
 
   useEffect(() => {
-    if (isOpen && isAuthenticated) {
+    // only leave the modal once we're on the right chain, otherwise the user never sees the warning
+    if (isOpen && walletStatus === 'connected') {
       goToDashboard();
     }
-  }, [isOpen, isAuthenticated, goToDashboard]);
+  }, [isOpen, walletStatus, goToDashboard]);
 
   // Handle escape key press
   const handleEscapeKey = useCallback(
@@ -52,10 +64,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   // Handle Web3 wallet connection
   const handleWeb3Connect = async () => {
     clearError();
-    const ok = await connectWallet();
-    if (ok || useAuthStore.getState().isAuthenticated) {
-      goToDashboard();
-    }
+    await connectWallet();
   };
 
   return (
@@ -115,35 +124,80 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     </p>
                   </div>
 
-                  {/* Form Content */}
-                  <div className="mt-8 space-y-5">
-                    <Button
-                      fullWidth
-                      disabled={loading}
-                      icon={<Wallet size={16} />}
-                      iconPosition="left"
-                      onClick={handleWeb3Connect}
-                      className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
-                    >
-                      {loading ? 'Connecting...' : 'Continue with Wallet'}
-                    </Button>
-                    {error && (
-                      <div
-                        className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-sm flex items-center justify-between"
-                        role="alert"
-                      >
-                        <span>{error}</span>
+                  <div className="mt-8 space-y-4" aria-live="polite">
+                    {status === 'no-wallet' && (
+                      <>
+                        <p className="text-sm text-neutral-600 text-center">
+                          You need the MetaMask extension to sign in. Install it, then refresh this page.
+                        </p>
+                        <a
+                          href="https://metamask.io/download/"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-primary w-full flex items-center justify-center gap-2"
+                        >
+                          Install MetaMask <ExternalLink size={14} />
+                        </a>
+                      </>
+                    )}
+
+                    {status === 'connecting' && (
+                      <div className="flex flex-col items-center gap-2 py-2 text-sm text-neutral-600">
+                        <Loader2 size={20} className="animate-spin text-blue-600" />
+                        Confirm the request in MetaMask...
+                      </div>
+                    )}
+
+                    {status === 'wrong-network' && (
+                      <>
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          <p className="flex items-center gap-2 font-medium">
+                            <AlertTriangle size={16} /> Wrong network
+                          </p>
+                          <p className="mt-1">{error}</p>
+                          {address && (
+                            <p className="mt-2 font-mono text-xs text-amber-700">
+                              {address.slice(0, 6)}...{address.slice(-4)}
+                            </p>
+                          )}
+                        </div>
+                        <Button fullWidth onClick={() => switchToPharos()}>
+                          Switch to {getTargetNetwork().config.chainName}
+                        </Button>
                         <button
                           type="button"
-                          onClick={() => {
-                            clearError();
-                            handleWeb3Connect();
-                          }}
-                          className="text-red-600 hover:text-red-800 font-medium"
+                          onClick={() => disconnectWallet()}
+                          className="w-full text-sm text-neutral-500 hover:text-neutral-700"
                         >
-                          Retry
+                          Disconnect
                         </button>
-                      </div>
+                      </>
+                    )}
+
+                    {(status === 'disconnected' || status === 'rejected' || status === 'error') && (
+                      <>
+                        {status !== 'disconnected' && error && (
+                          <div
+                            role="alert"
+                            className={`rounded-lg border p-3 text-sm ${
+                              status === 'rejected'
+                                ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                : 'border-red-200 bg-red-50 text-red-600'
+                            }`}
+                          >
+                            {error}
+                          </div>
+                        )}
+                        <Button
+                          fullWidth
+                          icon={<Wallet size={16} />}
+                          iconPosition="left"
+                          onClick={handleWeb3Connect}
+                          className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white"
+                        >
+                          {status === 'disconnected' ? 'Continue with Wallet' : 'Try again'}
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
