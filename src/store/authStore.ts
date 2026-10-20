@@ -239,6 +239,8 @@ interface AuthState {
   connectWallet: () => Promise<boolean>;
   switchToPharos: () => Promise<boolean>;
   disconnectWallet: () => Promise<void>;
+  watchWallet: (ethereum: any) => void;
+  syncWallet: () => Promise<void>;
   submitKYC: (documents: KYCData['documents']) => Promise<void>;
   updateKYCStatus: (status: KYCData['status']) => Promise<void>;
   toggleRole: (role: 'buyer' | 'seller', enabled: boolean) => Promise<void>;
@@ -434,77 +436,7 @@ export const useAuthStore = create<AuthState>()(
                 stats: { totalPurchases: 0, totalSales: 0 },
               };
 
-          safeOff(activeEthereumProvider, 'accountsChanged', accountsChangedHandler);
-          safeOff(activeEthereumProvider, 'chainChanged', chainChangedHandler);
-
-          accountsChangedHandler = async (updatedAccounts: string[]) => {
-            if (!updatedAccounts?.length) {
-              await get().disconnectWallet();
-              return;
-            }
-
-            const nextAddress = ethers.utils.getAddress(updatedAccounts[0]);
-            const e = getEthereum() || activeEthereumProvider;
-            let nextBalance = '0';
-            let nextChainId = get().user?.wallet?.chainId || 0;
-            try {
-              const nextProvider = createWeb3Provider(e);
-              nextBalance = ethers.utils.formatEther(await nextProvider.getBalance(nextAddress));
-              nextChainId = Number((await nextProvider.getNetwork()).chainId);
-            } catch {
-              // Keep the connected account even if RPC reads fail.
-            }
-
-            set((state) => ({
-              user: state.user
-                ? {
-                    ...state.user,
-                    wallet: {
-                      address: nextAddress,
-                      isConnected: true,
-                      provider: 'metamask',
-                      chainId: nextChainId,
-                      balance: nextBalance,
-                    },
-                  }
-                : state.user,
-            }));
-          };
-
-          chainChangedHandler = async (chainIdHex: string) => {
-            const parsedChainId = Number.parseInt(chainIdHex, 16);
-            const connectedAddress = get().user?.wallet?.address;
-            let nextBalance = get().user?.wallet?.balance || '0';
-            if (connectedAddress) {
-              try {
-                const e = getEthereum() || activeEthereumProvider;
-                nextBalance = ethers.utils.formatEther(
-                  await createWeb3Provider(e).getBalance(connectedAddress)
-                );
-              } catch {
-                // Ignore RPC read failures after a network change.
-              }
-            }
-
-            const onTarget = parsedChainId === getTargetNetwork().chainId;
-            set((state) => ({
-              walletStatus: onTarget ? 'connected' : 'wrong-network',
-              error: onTarget ? null : wrongNetworkMessage(parsedChainId),
-              user: state.user
-                ? {
-                    ...state.user,
-                    wallet: {
-                      ...state.user.wallet!,
-                      chainId: parsedChainId,
-                      balance: nextBalance,
-                    },
-                  }
-                : state.user,
-            }));
-          };
-
-          safeOn(ethereum, 'accountsChanged', accountsChangedHandler);
-          safeOn(ethereum, 'chainChanged', chainChangedHandler);
+          get().watchWallet(ethereum);
 
           const onTarget = chainId === getTargetNetwork().chainId;
           set({
@@ -519,6 +451,124 @@ export const useAuthStore = create<AuthState>()(
           const { status, message } = toWalletError(error);
           set({ walletStatus: status, error: message, loading: false });
           return false;
+        }
+      },
+
+      watchWallet: (ethereum: any) => {
+        safeOff(activeEthereumProvider, 'accountsChanged', accountsChangedHandler);
+        safeOff(activeEthereumProvider, 'chainChanged', chainChangedHandler);
+        activeEthereumProvider = ethereum;
+
+        accountsChangedHandler = async (updatedAccounts: string[]) => {
+          if (!updatedAccounts?.length) {
+            await get().disconnectWallet();
+            return;
+          }
+
+          const nextAddress = ethers.utils.getAddress(updatedAccounts[0]);
+          const e = getEthereum() || activeEthereumProvider;
+          let nextBalance = '0';
+          let nextChainId = get().user?.wallet?.chainId || 0;
+          try {
+            const nextProvider = createWeb3Provider(e);
+            nextBalance = ethers.utils.formatEther(await nextProvider.getBalance(nextAddress));
+            nextChainId = Number((await nextProvider.getNetwork()).chainId);
+          } catch {
+            // Keep the connected account even if RPC reads fail.
+          }
+
+          set((state) => ({
+            user: state.user
+              ? {
+                  ...state.user,
+                  wallet: {
+                    address: nextAddress,
+                    isConnected: true,
+                    provider: 'metamask',
+                    chainId: nextChainId,
+                    balance: nextBalance,
+                  },
+                }
+              : state.user,
+          }));
+        };
+
+        chainChangedHandler = async (chainIdHex: string) => {
+          const parsedChainId = Number.parseInt(chainIdHex, 16);
+          const connectedAddress = get().user?.wallet?.address;
+          let nextBalance = get().user?.wallet?.balance || '0';
+          if (connectedAddress) {
+            try {
+              const e = getEthereum() || activeEthereumProvider;
+              nextBalance = ethers.utils.formatEther(
+                await createWeb3Provider(e).getBalance(connectedAddress)
+              );
+            } catch {
+              // Ignore RPC read failures after a network change.
+            }
+          }
+
+          const onTarget = parsedChainId === getTargetNetwork().chainId;
+          set((state) => ({
+            walletStatus: onTarget ? 'connected' : 'wrong-network',
+            error: onTarget ? null : wrongNetworkMessage(parsedChainId),
+            user: state.user
+              ? {
+                  ...state.user,
+                  wallet: {
+                    ...state.user.wallet!,
+                    chainId: parsedChainId,
+                    balance: nextBalance,
+                  },
+                }
+              : state.user,
+          }));
+        };
+
+        safeOn(ethereum, 'accountsChanged', accountsChangedHandler);
+        safeOn(ethereum, 'chainChanged', chainChangedHandler);
+      },
+
+      // Runs once on app load. The persisted state only says "was connected",
+      // so ask MetaMask what is actually true now (eth_accounts never opens a popup).
+      syncWallet: async () => {
+        if (!get().isAuthenticated || !get().user?.wallet?.address) {
+          return;
+        }
+        const ethereum = getEthereum();
+        if (!ethereum) {
+          await get().disconnectWallet();
+          return;
+        }
+        try {
+          const accounts = await requestWallet<string[]>(ethereum, 'eth_accounts');
+          if (!accounts?.length) {
+            // locked or the site was disconnected in MetaMask
+            await get().disconnectWallet();
+            return;
+          }
+          const chainId = Number.parseInt(
+            await requestWallet<string>(ethereum, 'eth_chainId'),
+            16
+          );
+          const onTarget = chainId === getTargetNetwork().chainId;
+          set((state) => ({
+            walletStatus: onTarget ? 'connected' : 'wrong-network',
+            error: onTarget ? null : wrongNetworkMessage(chainId),
+            user: state.user?.wallet
+              ? {
+                  ...state.user,
+                  wallet: {
+                    ...state.user.wallet,
+                    address: ethers.utils.getAddress(accounts[0]),
+                    chainId,
+                  },
+                }
+              : state.user,
+          }));
+          get().watchWallet(ethereum);
+        } catch {
+          // MetaMask not answering yet, keep the saved state rather than signing out
         }
       },
 

@@ -69,7 +69,10 @@ function GlobalAuthModal() {
 
 function RedirectAfterAuth() {
   const navigate = useNavigate();
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  // on the wrong network the sign in modal stays open, so only redirect once really connected
+  const isAuthenticated = useAuthStore(
+    (state) => state.isAuthenticated && state.walletStatus === 'connected'
+  );
   const [hydrated, setHydrated] = useState(() => useAuthStore.persist.hasHydrated());
   const wasAuthenticated = useRef<boolean | null>(null);
 
@@ -97,6 +100,20 @@ function RedirectAfterAuth() {
   return null;
 }
 
+function WalletSync() {
+  const syncWallet = useAuthStore((state) => state.syncWallet);
+
+  useEffect(() => {
+    if (useAuthStore.persist.hasHydrated()) {
+      syncWallet();
+      return;
+    }
+    return useAuthStore.persist.onFinishHydration(() => syncWallet());
+  }, [syncWallet]);
+
+  return null;
+}
+
 function BootstrapApiData() {
   const fetchAssets = useMockDataStore((state) => state.fetchAssets);
   const fetchValidators = useValidatorStore((state) => state.fetchValidators);
@@ -115,6 +132,7 @@ function App() {
   return (
     <Router>
       <BootstrapApiData />
+      <WalletSync />
       <RedirectAfterAuth />
       <GlobalAuthModal />
       <Toaster position="top-right" />
