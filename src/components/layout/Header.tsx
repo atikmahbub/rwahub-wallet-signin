@@ -17,7 +17,9 @@ export const Header = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { isAuthenticated, logout, openAuthModal } = useAuthStore();
+  const { isAuthenticated, logout, openAuthModal, walletStatus, user } = useAuthStore();
+  const address = user?.wallet?.address;
+  const wrongNetwork = walletStatus === 'wrong-network';
 
   useEffect(() => {
     const handleScroll = () => {
@@ -60,12 +62,23 @@ export const Header = () => {
     if (isAuthenticated) {
       return (
         <div className="flex items-center gap-4">
-          <Link
-            to="/dashboard"
-            className="text-sm text-neutral-600 hover:text-blue-600"
-          >
-            Dashboard
-          </Link>
+          {address && (
+            <button
+              type="button"
+              onClick={wrongNetwork ? openAuthModal : undefined}
+              title={wrongNetwork ? 'Wrong network, click to switch' : address}
+              className={`flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-xs ${
+                wrongNetwork
+                  ? 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  : 'border-neutral-200 bg-white text-neutral-700 cursor-default'
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${wrongNetwork ? 'bg-amber-500' : 'bg-green-500'}`}
+              />
+              {address.slice(0, 6)}...{address.slice(-4)}
+            </button>
+          )}
           <Button
             variant="outline"
             onClick={handleLogout}
@@ -73,7 +86,7 @@ export const Header = () => {
             className="flex items-center gap-2"
           >
             <LogOut size={16} />
-            {isLoggingOut ? 'Logging out...' : 'Logout'}
+            {isLoggingOut ? 'Disconnecting...' : 'Disconnect'}
           </Button>
         </div>
       );
