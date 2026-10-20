@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { ethers } from 'ethers';
 import deployed from '@/config/contracts.json';
+import {
+  getNormalizedError,
+  NoWalletError,
+  toWalletError,
+  WalletStatus,
+} from '@/lib/wallet/errors';
 
 const PHAROS_DEVNET_CHAIN_ID = 50002;
 const PHAROS_DEVNET_HEX_CHAIN_ID = ethers.utils.hexValue(PHAROS_DEVNET_CHAIN_ID);
@@ -37,6 +43,11 @@ export const getTargetNetwork = () => {
   };
 };
 
+const wrongNetworkMessage = (chainId: number) =>
+  `You're on ${chainId ? `chain ${chainId}` : 'an unknown network'}. RWAHub needs ${
+    getTargetNetwork().config.chainName
+  }.`;
+
 let accountsChangedHandler: ((accounts: string[]) => Promise<void>) | null = null;
 let chainChangedHandler: ((chainId: string) => Promise<void>) | null = null;
 let activeEthereumProvider: any = null;
@@ -65,32 +76,6 @@ const getEip1193Provider = () => {
 };
 
 const getEthereum = () => getEip1193Provider();
-
-const getNormalizedError = (error: unknown): { code?: number; message: string } => {
-  if (typeof error === 'object' && error !== null) {
-    const maybeError = error as {
-      code?: number | string;
-      message?: string;
-      error?: { code?: number | string; message?: string };
-      data?: { originalError?: { code?: number | string } };
-    };
-    const rawCode =
-      maybeError.code ??
-      maybeError.error?.code ??
-      maybeError.data?.originalError?.code;
-    const code = rawCode === undefined ? undefined : Number(rawCode);
-    return {
-      code: Number.isFinite(code) ? code : undefined,
-      message: maybeError.message ?? maybeError.error?.message ?? 'Unknown wallet error',
-    };
-  }
-
-  if (error instanceof Error) {
-    return { message: error.message };
-  }
-
-  return { message: 'Unknown wallet error' };
-};
 
 const createWeb3Provider = (ethereum: any) =>
   new ethers.providers.Web3Provider(ethereum, 'any');
@@ -242,6 +227,7 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   error: string | null;
+  walletStatus: WalletStatus;
   authModalOpen: boolean;
   openAuthModal: () => void;
   closeAuthModal: () => void;
@@ -284,6 +270,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       loading: false,
       error: null,
+      walletStatus: 'disconnected',
       authModalOpen: false,
       openAuthModal: () => set({ authModalOpen: true, error: null }),
       closeAuthModal: () => set({ authModalOpen: false }),
@@ -406,11 +393,11 @@ export const useAuthStore = create<AuthState>()(
           return false;
         }
         try {
-          set({ loading: true, error: null });
+          set({ loading: true, error: null, walletStatus: 'connecting' });
 
           const ethereum = getEthereum();
           if (!ethereum) {
-            throw new Error('Please install MetaMask or another Web3 wallet.');
+            throw new NoWalletError();
           }
           if (typeof ethereum.request !== 'function') {
             throw new Error('Wallet provider is not available. Please refresh the page and try again.');
@@ -435,6 +422,7 @@ export const useAuthStore = create<AuthState>()(
           }
           const address = ethers.utils.getAddress(accounts[0]);
 
+          // if the switch is refused we still connect, status becomes wrong-network
           let chainId = 0;
           try {
             chainId = await ensurePharosNetwork(ethereum);
@@ -524,11 +512,10 @@ export const useAuthStore = create<AuthState>()(
               }
             }
 
+            const onTarget = parsedChainId === getTargetNetwork().chainId;
             set((state) => ({
-              error:
-                parsedChainId === getTargetNetwork().chainId
-                  ? null
-                  : 'Wallet connected. Switch network to send transactions.',
+              walletStatus: onTarget ? 'connected' : 'wrong-network',
+              error: onTarget ? null : wrongNetworkMessage(parsedChainId),
               user: state.user
                 ? {
                     ...state.user,
@@ -545,46 +532,35 @@ export const useAuthStore = create<AuthState>()(
           safeOn(ethereum, 'accountsChanged', accountsChangedHandler);
           safeOn(ethereum, 'chainChanged', chainChangedHandler);
 
+          const onTarget = chainId === getTargetNetwork().chainId;
           set({
             isAuthenticated: true,
             user: nextUser,
             loading: false,
-            error:
-              chainId === getTargetNetwork().chainId
-                ? null
-                : 'Wallet connected. Switch network to send transactions.',
+            walletStatus: onTarget ? 'connected' : 'wrong-network',
+            error: onTarget ? null : wrongNetworkMessage(chainId),
           });
           return true;
         } catch (error) {
-          const normalized = getNormalizedError(error);
-          const message = normalized.message.toLowerCase();
-          let errorMessage = 'Failed to connect wallet. Please try again.';
-          if (normalized.code === 4001 || message.includes('rejected') || message.includes('denied')) {
-            errorMessage = 'Wallet connection was rejected.';
-          } else if (normalized.code === -32002 || message.includes('already processing')) {
-            errorMessage = 'MetaMask is already open. Confirm the pending request, then retry.';
-          } else if (message.includes('install metamask') || message.includes('wallet provider is not available')) {
-            errorMessage = 'Please install MetaMask or unlock it and refresh this page.';
-          } else if (message.includes('receiving end does not exist')) {
-            errorMessage = 'Wallet extension is not responding. Reopen MetaMask and refresh this page.';
-          } else if (message.includes('timed out')) {
-            errorMessage = 'Wallet request timed out. Open your wallet popup and try again.';
-          }
-          set({ error: errorMessage, loading: false });
+          const { status, message } = toWalletError(error);
+          set({ walletStatus: status, error: message, loading: false });
           return false;
         }
       },
 
       switchToPharos: async () => {
+        const ethereum = getEthereum();
+        if (!ethereum) {
+          const { status, message } = toWalletError(new NoWalletError());
+          set({ walletStatus: status, error: message });
+          return false;
+        }
         try {
-          const ethereum = getEthereum();
-          if (!ethereum) {
-            set({ error: 'Please install MetaMask or another Web3 wallet.' });
-            return false;
-          }
           const chainId = await ensurePharosNetwork(ethereum);
+          const onTarget = chainId === getTargetNetwork().chainId;
           set((state) => ({
-            error: null,
+            walletStatus: onTarget ? 'connected' : 'wrong-network',
+            error: onTarget ? null : wrongNetworkMessage(chainId),
             user: state.user?.wallet
               ? {
                   ...state.user,
@@ -592,13 +568,21 @@ export const useAuthStore = create<AuthState>()(
                 }
               : state.user,
           }));
-          return chainId === getTargetNetwork().chainId;
-        } catch {
-          set({ error: 'Could not switch to Pharos Devnet. Approve the request in MetaMask.' });
+          return onTarget;
+        } catch (error) {
+          // still connected, just on the wrong chain
+          const { status, message } = toWalletError(error);
+          set({
+            walletStatus: 'wrong-network',
+            error:
+              status === 'rejected'
+                ? `Network switch cancelled. RWAHub needs ${getTargetNetwork().config.chainName}.`
+                : message,
+          });
           return false;
         }
       },
-      
+
       disconnectWallet: async () => {
         try {
           set({ loading: true, error: null });
@@ -614,6 +598,7 @@ export const useAuthStore = create<AuthState>()(
             user: null,
             loading: false,
             error: null,
+            walletStatus: 'disconnected',
           });
           localStorage.removeItem('auth-storage');
           sessionStorage.clear();
@@ -728,7 +713,14 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      clearError: () => set({ error: null }), // Implementation of clearError
+      clearError: () =>
+        set((state) => ({
+          error: null,
+          walletStatus:
+            state.walletStatus === 'rejected' || state.walletStatus === 'error'
+              ? 'disconnected'
+              : state.walletStatus,
+        })), // Implementation of clearError
     }),
     {
       name: 'auth-storage',
@@ -740,6 +732,12 @@ export const useAuthStore = create<AuthState>()(
         if (state) {
           state.loading = false;
           state.error = null;
+          const wallet = state.user?.wallet;
+          state.walletStatus = !wallet?.isConnected
+            ? 'disconnected'
+            : wallet.chainId === getTargetNetwork().chainId
+              ? 'connected'
+              : 'wrong-network';
         }
       },
     }
