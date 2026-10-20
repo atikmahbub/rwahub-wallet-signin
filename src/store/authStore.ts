@@ -330,33 +330,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: async () => {
-        try {
-          console.log('Starting logout process...');
-          set({ loading: true, error: null });
-          const currentUser = get().user;
-          if (currentUser?.wallet?.isConnected) {
-            console.log('Wallet connected, disconnecting...');
-            await get().disconnectWallet();
-          } else {
-            console.log('No wallet connected, clearing state...');
-            set({
-              isAuthenticated: false,
-              user: null,
-              error: null,
-              loading: false,
-            });
-            localStorage.removeItem('auth-storage');
-            sessionStorage.clear();
-            console.log('State cleared, redirecting to /');
-            window.location.href = '/';
-          }
-        } catch (error) {
-          console.error('Logout error:', error);
-          set({
-            error: (error as Error).message,
-            loading: false,
-          });
-        }
+        await get().disconnectWallet();
       },
 
       resetPassword: async (email: string) => {
@@ -583,31 +557,32 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      // Navigation is left to the caller, this only resets the wallet + auth state.
       disconnectWallet: async () => {
+        const ethereum = activeEthereumProvider || getEthereum();
+        safeOff(ethereum, 'accountsChanged', accountsChangedHandler);
+        safeOff(ethereum, 'chainChanged', chainChangedHandler);
+        accountsChangedHandler = null;
+        chainChangedHandler = null;
+        activeEthereumProvider = null;
+
+        set({
+          isAuthenticated: false,
+          user: null,
+          loading: false,
+          error: null,
+          walletStatus: 'disconnected',
+        });
+
+        // A dapp can't really disconnect MetaMask. Newer versions support revoking the
+        // permission, so the next Sign In asks again. Older ones just ignore this.
         try {
-          set({ loading: true, error: null });
-          if (activeEthereumProvider) {
-            safeOff(activeEthereumProvider, 'accountsChanged', accountsChangedHandler);
-            safeOff(activeEthereumProvider, 'chainChanged', chainChangedHandler);
-          }
-          accountsChangedHandler = null;
-          chainChangedHandler = null;
-          activeEthereumProvider = null;
-          set({
-            isAuthenticated: false,
-            user: null,
-            loading: false,
-            error: null,
-            walletStatus: 'disconnected',
+          await ethereum?.request({
+            method: 'wallet_revokePermissions',
+            params: [{ eth_accounts: {} }],
           });
-          localStorage.removeItem('auth-storage');
-          sessionStorage.clear();
-          window.location.href = '/';
-        } catch (error) {
-          set({
-            error: (error as Error).message,
-            loading: false,
-          });
+        } catch {
+          // not supported, fine
         }
       },
 

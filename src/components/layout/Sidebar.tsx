@@ -35,8 +35,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, toggleSidebar }) 
   const handleLogout = async () => {
     try {
       setLogoutError(null);
-      await logout();
       navigate('/');
+      await logout();
     } catch (err) {
       console.error('Logout failed:', err);
       setLogoutError(error || 'Failed to log out. Please try again.');

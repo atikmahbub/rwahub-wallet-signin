@@ -27,6 +27,7 @@ export default function ProfilePage() {
 
   const handleDisconnectWallet = async () => {
     try {
+      navigate('/');
       await disconnectWallet();
     } catch (err) {
       console.error('Failed to disconnect wallet:', err);

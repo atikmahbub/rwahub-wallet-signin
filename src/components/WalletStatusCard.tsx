@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Check, Copy, LogOut } from "lucide-react";
 import { getTargetNetwork, useAuthStore } from "@/store/authStore";
 
@@ -16,6 +17,7 @@ export const WalletStatusCard = () => {
   const wallet = useAuthStore((state) => state.user?.wallet);
   const switchToPharos = useAuthStore((state) => state.switchToPharos);
   const logout = useAuthStore((state) => state.logout);
+  const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [switching, setSwitching] = useState(false);
 
@@ -66,7 +68,10 @@ export const WalletStatusCard = () => {
         </button>
         <button
           type="button"
-          onClick={() => logout()}
+          onClick={() => {
+            navigate("/");
+            logout();
+          }}
           title="Disconnect"
           aria-label="Disconnect wallet"
           className="text-gray-400 hover:text-red-600"
